@@ -6,19 +6,18 @@ import { EXCERPTS, VOLUME_CLIP } from "./clips";
 
 const VERSIONS = ["real", "ddsp", "final", "final_v2", "x5", "v2_100"];
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
-const SCALES = [
-  { key: "realismo", q: "¿Qué tan real suena?", lo: "Claramente sintética", hi: "Una guitarra real" },
-  { key: "ruido_fondo", q: "¿Cuánto ruido de fondo o soplido se oye?", lo: "Nada", hi: "Mucho" },
-  { key: "ruidos_extranos", q: "¿Cuántos ruidos extraños se oyen (zumbidos, clics, notas desafinadas)?", lo: "Ninguno", hi: "Muchos" },
-  { key: "sala", q: "¿Suena dentro de una sala real?", lo: "Seca o artificial", hi: "Una sala real" },
+const REALISM = { q: "¿Qué tan real suena?", lo: "Claramente sintética", hi: "Una guitarra real" };
+const YESNO = [
+  { key: "ruido_fondo", q: "¿Escuchas un soplido o siseo de fondo, como viento?" },
+  { key: "ruidos_extranos", q: "¿Escuchas algún sonido extraño (clics, zumbidos, chasquidos)?" },
 ] as const;
-type ScaleKey = (typeof SCALES)[number]["key"];
-type Rating = Record<ScaleKey, number | null>;
+type YesNoKey = (typeof YESNO)[number]["key"];
+type Rating = { realismo: number | null } & Record<YesNoKey, boolean | null>;
 type Step = "inicio" | "volumen" | "prueba" | "final" | "gracias";
 type Plan = { pid: string; order: number[]; perms: string[][] };
 type Saved = { plan: Plan | null; step: Step; done: number };
 
-const STORE = "prueba-escucha-v1";
+const STORE = "prueba-escucha-v2";
 const N = EXCERPTS.length;
 
 function shuffle<T>(xs: T[]): T[] {
@@ -210,7 +209,7 @@ function PlayButton(props: { label: string; active: boolean; progress: number; o
   );
 }
 
-const emptyRating = (): Rating => ({ realismo: null, ruido_fondo: null, ruidos_extranos: null, sala: null });
+const emptyRating = (): Rating => ({ realismo: null, ruido_fondo: null, ruidos_extranos: null });
 
 function Excerpt(props: { n: number; excerptIndex: number; perm: string[]; pid: string; onSaved: () => void }) {
   const ex = EXCERPTS[props.excerptIndex];
@@ -224,13 +223,14 @@ function Excerpt(props: { n: number; excerptIndex: number; perm: string[]; pid: 
   const [state, setState] = useState<"idle" | "saving" | "error">("idle");
 
   const unheard = LETTERS.filter((l) => plays[l] === 0);
-  const unrated = LETTERS.reduce((n, l) => n + SCALES.filter((s) => ratings[l][s.key] === null).length, 0);
+  const unrated = LETTERS.reduce((n, l) => n + Object.values(ratings[l]).filter((v) => v === null).length, 0);
   const ready = unheard.length === 0 && unrated === 0 && preferred !== null;
 
   const play = (l: string) => {
     if (toggle(l)) setPlays((p) => ({ ...p, [l]: p[l] + 1 }));
   };
-  const rate = (l: string, k: ScaleKey, v: number) => setRatings((r) => ({ ...r, [l]: { ...r[l], [k]: v } }));
+  const rate = (l: string, k: keyof Rating, v: number | boolean) =>
+    setRatings((r) => ({ ...r, [l]: { ...r[l], [k]: v } as Rating }));
 
   const save = async () => {
     if (!ready || preferred === null) return;
@@ -249,7 +249,7 @@ function Excerpt(props: { n: number; excerptIndex: number; perm: string[]; pid: 
 
   const missing = [
     unheard.length ? `escuchar ${unheard.join(", ")}` : "",
-    unrated ? `${unrated} ${unrated === 1 ? "calificación" : "calificaciones"}` : "",
+    unrated ? `${unrated} ${unrated === 1 ? "respuesta" : "respuestas"}` : "",
     preferred === null ? "elegir la que más te gustó" : "",
   ].filter(Boolean);
 
@@ -261,8 +261,8 @@ function Excerpt(props: { n: number; excerptIndex: number; perm: string[]; pid: 
         </p>
         <h2 className="mt-1 text-xl font-bold text-stone-900">Seis versiones del mismo fragmento</h2>
         <p className="mt-2 text-sm text-stone-700">
-          Escucha cada versión y califícala. Puedes repetirlas y cambiar tus respuestas antes de continuar. Mueve cada
-          deslizador al menos una vez.
+          Escucha cada versión y responde sus tres preguntas. Puedes repetirlas y cambiar tus respuestas antes de
+          continuar. Mueve cada deslizador al menos una vez.
         </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
@@ -277,16 +277,33 @@ function Excerpt(props: { n: number; excerptIndex: number; perm: string[]; pid: 
                 </div>
               </div>
             </div>
-            {SCALES.map((s) => (
-              <Slider
-                key={s.key}
-                label={s.q}
-                lo={s.lo}
-                hi={s.hi}
-                value={ratings[l][s.key]}
-                onChange={(v) => rate(l, s.key, v)}
-              />
-            ))}
+            <Slider
+              label={REALISM.q}
+              lo={REALISM.lo}
+              hi={REALISM.hi}
+              value={ratings[l].realismo}
+              onChange={(v) => rate(l, "realismo", v)}
+            />
+            {YESNO.map((s) => {
+              const v = ratings[l][s.key];
+              return (
+                <div key={s.key} className="space-y-1.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm text-stone-800">{s.q}</span>
+                    {v === null && <span className="shrink-0 text-xs text-amber-700">sin responder</span>}
+                  </div>
+                  <Choice
+                    name={`${s.key}-${ex.id}-${l}`}
+                    options={[
+                      ["si", "Sí"],
+                      ["no", "No"],
+                    ]}
+                    value={v === null ? null : v ? "si" : "no"}
+                    onChange={(x) => rate(l, s.key, x === "si")}
+                  />
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
@@ -349,9 +366,9 @@ function Start(props: { onStart: (p: Plan) => void }) {
         </p>
         <p>
           Vas a escuchar {N} fragmentos cortos (5 segundos), cada uno en 6 versiones. Algunas versiones las generó un
-          computador y una es la grabación real, pero no sabrás cuál es cuál. Para cada versión vas a responder 4
-          preguntas con un deslizador y, al final de cada fragmento, vas a elegir la que más te gustó. Toma unos 10 a 15
-          minutos.
+          computador y una es la grabación real, pero no sabrás cuál es cuál. Para cada versión vas a responder qué tan
+          real suena (con un deslizador) y dos preguntas de sí o no; al final de cada fragmento, vas a elegir la que más
+          te gustó. Toma unos 10 minutos.
         </p>
         <p>Usa audífonos si puedes, en un lugar silencioso.</p>
         <p className="text-sm text-stone-600">

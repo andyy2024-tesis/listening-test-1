@@ -20,7 +20,7 @@ LETTERS = {"A", "B", "C", "D", "E", "F"}
 INSTRUMENTO = {"ninguno", "guitarra", "otro"}
 ANIOS = {"menos de 1", "1 a 3", "4 a 10", "mas de 10"}
 ESCUCHA = {"audifonos", "parlantes", "celular"}
-SCALES = ("realismo", "ruido_fondo", "ruidos_extranos", "sala")
+YESNO = ("ruido_fondo", "ruidos_extranos")  # yes/no: background hiss heard, odd noises heard
 MAX_BODY = 20_000
 
 
@@ -35,6 +35,11 @@ def need(cond, msg):
 
 def score(v, lo=0, hi=100):
     need(isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi, "valor fuera de rango")
+    return v
+
+
+def yesno(v):
+    need(isinstance(v, bool), "respuesta sí/no inválida")
     return v
 
 
@@ -67,16 +72,17 @@ def save(d, conn):
         need({v.get("version") for v in vs if isinstance(v, dict)} == VERSIONS, "versiones inválidas")
         need({v.get("letra") for v in vs} == LETTERS, "letras inválidas")
         rows = [(pid, ex, orden, v["version"], v["letra"], v["version"] == pref,
-                 *(score(v.get(k)) for k in SCALES), score(v.get("reproducciones"), 0, 1000)) for v in vs]
+                 score(v.get("realismo")), *(yesno(v.get(k)) for k in YESNO),
+                 score(v.get("reproducciones"), 0, 1000)) for v in vs]
         with conn.cursor() as cur:
             cur.executemany(
                 "insert into respuestas (participante, extracto, orden_extracto, version, letra, preferida, "
-                "realismo, ruido_fondo, ruidos_extranos, sala, reproducciones) "
-                "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "realismo, ruido_fondo, ruidos_extranos, reproducciones) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "on conflict (participante, extracto, version) do update set orden_extracto = excluded.orden_extracto, "
                 "letra = excluded.letra, preferida = excluded.preferida, realismo = excluded.realismo, "
                 "ruido_fondo = excluded.ruido_fondo, ruidos_extranos = excluded.ruidos_extranos, "
-                "sala = excluded.sala, reproducciones = excluded.reproducciones, creado = now()", rows)
+                "reproducciones = excluded.reproducciones, creado = now()", rows)
     elif tipo == "final":
         pid = participant_id(d, "participante")
         c = d.get("comentario") or None
